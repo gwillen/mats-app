@@ -11,10 +11,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+use_model_name = "Qwen/Qwen2.5-7B-Instruct"
+#use_model_name = "meta-llama/Llama-3.1-8B-Instruct"
+
 # Import our dataset generator
 from quotation_test_dataset import generate_quotation_test_dataset
 
-def setup_model(model_name="meta-llama/Llama-3.1-8B-Instruct", base_model=False):
+def setup_model(model_name=use_model_name, base_model=False):
     """
     Load the specified model and tokenizer.
 
@@ -42,7 +45,7 @@ def setup_model(model_name="meta-llama/Llama-3.1-8B-Instruct", base_model=False)
 
     return model, tokenizer
 
-def run_model(model, tokenizer, prompt, max_new_tokens=512, temperature=0.1):
+def run_model(model, tokenizer, prompt, max_new_tokens=512, temperature=0):
     """
     Run the model on a single prompt and return the generated text.
 
@@ -226,8 +229,10 @@ def main():
 
     # Define models to test
     models_to_test = [
-        {"name": "meta-llama/Llama-3.1-8B-Instruct", "is_base": False, "selected_layers": [0, 8, 16, 24]},
-        {"name": "meta-llama/Llama-3.1-8B", "is_base": True, "selected_layers": [0, 8, 16, 24]}
+#        {"name": "meta-llama/Llama-3.1-8B-Instruct", "is_base": False, "selected_layers": [0, 8, 16, 24]},
+#        {"name": "meta-llama/Llama-3.1-8B", "is_base": True, "selected_layers": [0, 8, 16, 24]}
+        {"name": "Qwen/Qwen2.5-7B-Instruct", "is_base": False, "selected_layers": [0, 8, 16, 24]},
+        {"name": "Qwen/Qwen2.5-7B", "is_base": True, "selected_layers": [0, 8, 16, 24]}
     ]
 
     # Test each model
