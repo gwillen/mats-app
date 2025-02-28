@@ -454,7 +454,7 @@ def main():
     """Main function to run SAE analysis."""
     parser = argparse.ArgumentParser(description="Llama Scope SAE Analysis")
 
-    parser.add_argument("--results-dir", type=str, required=True,
+    parser.add_argument("--results-dir", type=str, default="latest_results",
                        help="Directory containing test results")
     parser.add_argument("--model-type", type=str, choices=["instruct", "base"], default="instruct",
                        help="Model type to analyze")
