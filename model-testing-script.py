@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 import dotenv
+import importlib
 
 #%%
 # Load environment variables
@@ -23,7 +24,9 @@ use_model_name = "meta-llama/Llama-3.1-8B-Instruct"
 
 #%%
 # Import our dataset generator
+import quotation_test_dataset
 from quotation_test_dataset import generate_quotation_test_dataset
+importlib.reload(quotation_test_dataset)
 
 #%%
 def print_model_device_map(model):
@@ -170,7 +173,7 @@ Assistant: """
     return formatted_prompt
 
 #%%
-def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=8, capture_layers=None):
+def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99, gpu_batch_size=99, capture_layers=None):
     """
     Run tests on the model using batched processing for better GPU utilization.
 
@@ -247,7 +250,7 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=8, 
         input_lengths = []
 
         # Process in smaller generation batches if needed (can help with memory)
-        gen_batch_size = min(batch_size, 2)  # Adjust based on your GPU memory
+        gen_batch_size = min(batch_size, gpu_batch_size)  # Adjust based on your GPU memory
 
         for i in range(0, len(formatted_prompts), gen_batch_size):
             sub_batch_end = min(i + gen_batch_size, len(formatted_prompts))
@@ -420,6 +423,12 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output_dir = f"results/quotation_test_{timestamp}"
     os.makedirs(base_output_dir, exist_ok=True)
+
+    # Symlink the latest results to a fixed location
+    latest_output_dir = "latest_results"
+    if os.path.exists(latest_output_dir):
+        os.remove(latest_output_dir)
+    os.symlink(base_output_dir, latest_output_dir, target_is_directory=True)
 
     # Save the test dataset
     test_dataset.to_csv(os.path.join(base_output_dir, "test_dataset.csv"), index=False)
