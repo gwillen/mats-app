@@ -1,4 +1,5 @@
 /venv/
 /quotation_test_results*
+/results/
 /__pycache__/
 /.env

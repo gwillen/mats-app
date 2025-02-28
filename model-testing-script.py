@@ -203,15 +203,14 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=8, 
     # Add Llama 3 specific stopping tokens
     if "Instruct" in model_name:
         stop_tokens = ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
-        # print out the list of special tokens in the tokenizer's vocabulary
-        print(f"Special tokens in the tokenizer's vocabulary: {tokenizer.special_tokens_map}")
+        #print(f"Special tokens in the tokenizer's vocabulary: {tokenizer.special_tokens_map}")
         for token in stop_tokens:
             if token in tokenizer.get_vocab():
                 token_id = tokenizer.convert_tokens_to_ids(token)
                 eos_token_ids.append(token_id)
-                print(f"Added {token} token (ID: {token_id}) to stopping criteria")
+                #print(f"Added {token} token (ID: {token_id}) to stopping criteria")
             else:
-                print(f"Token {token} not found in tokenizer's vocabulary")
+                print(f"WARNING: Token {token} not found in tokenizer's vocabulary")
     else:
         # We want to stop any time we see "User:" or "Assistant:" in the response, but they might not be single tokens.
         # So we'll just stop at the first token that matches "User" or "Assistant".
@@ -419,7 +418,7 @@ def main():
 
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_output_dir = f"quotation_test_results_{timestamp}"
+    base_output_dir = f"results/quotation_test_{timestamp}"
     os.makedirs(base_output_dir, exist_ok=True)
 
     # Save the test dataset
