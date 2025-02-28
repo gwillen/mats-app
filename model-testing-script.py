@@ -26,9 +26,13 @@ use_model_name = "meta-llama/Llama-3.1-8B-Instruct"
 
 #%%
 # Import our dataset generator
-import quotation_test_dataset
-from quotation_test_dataset import generate_quotation_test_dataset
-importlib.reload(quotation_test_dataset)
+#import quotation_test_dataset
+#from quotation_test_dataset import generate_quotation_test_dataset
+#importlib.reload(quotation_test_dataset)
+
+import simplified_test_dataset
+from simplified_test_dataset import generate_simplified_test_dataset
+importlib.reload(simplified_test_dataset)
 
 #%%
 from typing import Dict, Callable, Optional
@@ -121,7 +125,8 @@ def print_model_structure(model, max_depth=2):
 
 #%%
 
-MODEL_CACHE = {}
+if "MODEL_CACHE" not in globals():
+    MODEL_CACHE = {}
 
 #%%
 # Let's just try the first one
@@ -228,7 +233,7 @@ def capture_activations(model, tokenizer, prompt, layer_numbers=None):
 """
 
 #%%
-default_sys_prompt = "You are a helpful assistant. Follow the user's instructions. Be concise."
+default_sys_prompt = "You are a helpful assistant. Follow the user's instructions. Give only single-word answers."
 
 def format_prompt(prompt, instruct=False, sys_prompt=default_sys_prompt):
     if instruct:
@@ -255,7 +260,33 @@ Assistant:
     return formatted_prompt
 
 #%%
-def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99, gpu_batch_size=99, capture_layers=None):
+# General-purpose utility function to show the shape of anything for debugging.
+# - If it's a tensor, the tensor shape
+# - If it's a dict, the keys, and the shape of each value
+# - If it's a list, the length, and the shape of the first element
+# - If it's a tuple, the shapes of each element
+# (all recursively)
+# - For any other type, just say what type it is.
+def show_shape(thing, prefix=""):
+    if isinstance(thing, torch.Tensor):
+        print(f"{prefix}Tensor {thing.shape}:")
+    elif isinstance(thing, dict):
+        print(f"{prefix}Dict:")
+        for key, value in thing.items():
+            show_shape(value, f"{prefix}[{key}] ")
+    elif isinstance(thing, list):
+        print(f"{prefix}List[{len(thing)}]:")
+        if len(thing) > 0:
+            show_shape(thing[0], f"{prefix}[0] ")
+    elif isinstance(thing, tuple):
+        print(f"{prefix}Tuple[{len(thing)}]:")
+        for i, value in enumerate(thing[:5]):
+            show_shape(value, f"{prefix}[{i}] ")
+    else:
+        print(f"{prefix}({type(thing)})")
+
+#%%
+def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99, gpu_batch_size=99, capture_layers=None, top_n=20):
     """
     Run tests on the model using batched processing for better GPU utilization.
 
@@ -282,11 +313,12 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
 
     # Set up stopping criteria for Llama 3 models
     model_name = model.config._name_or_path
+    instruct = "Instruct" in model_name
     eos_token_ids = [tokenizer.eos_token_id]  # Default EOS token
     stopping_criteria = []
 
     # Add Llama 3 specific stopping tokens
-    if "Instruct" in model_name:
+    if instruct:
         stop_tokens = ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]
         #print(f"Special tokens in the tokenizer's vocabulary: {tokenizer.special_tokens_map}")
         for token in stop_tokens:
@@ -299,7 +331,7 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
     else:
         # We want to stop any time we see "User:" or "Assistant:" in the response, but they might not be single tokens.
         # So we'll just stop at the first token that matches "User" or "Assistant".
-        stop_strings = ["User", "Assistant"]
+        stop_strings = ["User:", "Assistant:"]
         # XXX: this doesn't do _quite_ what we want, because it leaves the stop string in the response.
         stopping_criteria = [StopStringCriteria(tokenizer, stop_strings)]
 
@@ -307,6 +339,10 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
 
     # Remove any existing hooks on the model
     remove_all_model_hooks(model, hook_fn_name="get_activations_hook_gwillen")
+
+    # Add columns for top n logits and their probabilities
+    test_dataset['top_n_tokens'] = None
+    test_dataset['top_n_probs'] = None
 
     # Process test cases in batches
     for batch_start in tqdm(range(0, len(test_dataset), batch_size), desc="Running batched tests"):
@@ -323,7 +359,6 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
         formatted_prompts = []
 
         for prompt in prompts:
-            instruct = "Instruct" in model_name
             formatted_prompt = format_prompt(prompt, instruct=instruct)
             formatted_prompts.append(formatted_prompt)
 
@@ -401,14 +436,37 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=eos_token_ids,
                     stopping_criteria=stopping_criteria,
+                    output_scores=True,  # Enable output scores
+                    return_dict_in_generate=True  # Return a dictionary with scores
                 )
 
+            # output is a dictionary with keys 'sequences' and 'scores'
+            # sequences is a tensor of shape (batch_size, seq_len)
+            # scores is a tensor of shape (batch_size, seq_len, vocab_size)
+            show_shape(outputs, "generate outputs: ")
+
+            # Extract logits for the first token of the response
+            logits = outputs.scores[0]  # Get logits for the first generated token
+            probs = torch.softmax(logits, dim=-1)  # Convert logits to probabilities
+            top_n_probs, top_n_indices = torch.topk(probs, top_n)  # Get top n probabilities and their indices
+
+            show_shape(top_n_indices, "top n indices: ")
+
+            # Convert token indices to text
+            top_n_tokens = [[tokenizer.decode(idx) for idx in indices] for indices in top_n_indices]
+            show_shape(top_n_tokens, "top n tokens: ")
+            show_shape(top_n_probs, "top n probs: ")
+
             # Process each output in the sub-batch
-            for j, output in enumerate(outputs):
+            for j, output in enumerate(outputs.sequences):
                 input_length = sub_input_lengths[j]
                 generated_ids = output[input_length:]
-                generated_text = tokenizer.decode(generated_ids) #, skip_special_tokens=True)
+                generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
                 batch_responses.append(generated_text)
+
+                # Save top n tokens and their probabilities
+                test_dataset.at[batch_indices[j], 'top_n_tokens'] = top_n_tokens[j]
+                test_dataset.at[batch_indices[j], 'top_n_probs'] = top_n_probs[j].tolist()
 
             # Remove the hooks
             for hook in hooks:
@@ -444,6 +502,18 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
             # XXX... I'm not sure this is doing anything? But why not?
             torch.cuda.empty_cache()
 
+        # For the base model, trim off our stopwords from the end of the response, as well as any preceding newlines.
+        if not instruct:
+            for i, response in enumerate(batch_responses):
+                # Remove trailing stop words
+                response = response.rstrip()  # XXX: why is this necessary?
+                for stopword in stop_strings:
+                    if response.endswith(stopword):
+                        response = response[:response.rfind(stopword)]
+                    else:
+                        pass #print(f"Response {response} does not end with stopword {stopword}")
+                batch_responses[i] = response.rstrip()
+
         # Store responses in the dataset
         for i, idx in enumerate(batch_indices):
             test_dataset.at[idx, 'response'] = batch_responses[i]
@@ -472,12 +542,12 @@ def main():
     """Main function to run the tests on both base and instruct models."""
     # Generate the test dataset
     print("Generating test dataset...")
-    test_dataset = generate_quotation_test_dataset()
+    test_dataset = generate_simplified_test_dataset()
     print(f"Generated {len(test_dataset)} test cases")
 
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_output_dir = f"results/quotation_test_{timestamp}"
+    base_output_dir = f"results/simplified_test_{timestamp}"
     os.makedirs(base_output_dir, exist_ok=True)
 
     # Symlink the latest results to a fixed location
