@@ -120,13 +120,13 @@ def print_model_structure(model, max_depth=2):
     _print_structure(model)
 
 #%%
-# Let's just try the first one
-models = list(MODEL_CACHE.keys())
-print_model_structure(MODEL_CACHE[models[0]][0])
-
-#%%
 
 MODEL_CACHE = {}
+
+#%%
+# Let's just try the first one
+#models = list(MODEL_CACHE.keys())
+#print_model_structure(MODEL_CACHE[models[0]][0])
 
 #%%
 def setup_model(model_name=use_model_name, base_model=False, device_map="cuda"):
@@ -377,7 +377,7 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
                     else:
                         pass #print(f"Activation shape: {shape}; shape as list: {list(shape)}; shape[1]: {shape[1]}")
                     # Log about it
-                    print(f"Captured activation for {name} with shape {activation_dict[name].shape} in batch starting at {i}")
+                    #print(f"Captured activation for {name} with shape {activation_dict[name].shape} in batch starting at {i}")
                 return get_activations_hook_gwillen
 
             # Register hooks for the specified layers
@@ -420,9 +420,12 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
                 # Since we're batching, we need to mask the activations with the attention mask
                 attn_mask = sub_batch_inputs['attention_mask'][i]
                 real_length = attn_mask.sum().item()
-                assert(torch.all(attn_mask[:real_length] == 1) and torch.all(attn_mask[real_length:] == 0))
+                if not (torch.all(attn_mask[-real_length:] == 1) and torch.all(attn_mask[:-real_length] == 0)):
+                    print(f"Attention mask for test case {i} is not as expected: {attn_mask}")
+                    print(f"We expected padding of zeroes, followed by (real_length) of ones. Real length: {real_length}")
+                    assert False
                 for layer_name, activations in activation_dict.items():
-                    test_activations[layer_name] = activations[i, :real_length, :]
+                    test_activations[layer_name] = activations[i, -real_length:, :]
                 #batch_activations.append(test_activations)
                 test_id = batch_test_ids[i]
                 activation_data[test_id] = {
@@ -505,6 +508,13 @@ def main():
         # Create model-specific output directory
         model_dir_name = model_name.replace("/", "_")
         model_output_dir = os.path.join(base_output_dir, model_dir_name)
+
+        # Create a symlink from either 'base' or 'instruct' to the model-specific output directory
+        symlink_name = "base" if is_base else "instruct"
+        symlink_path = os.path.join(base_output_dir, symlink_name)
+        if os.path.exists(symlink_path):
+            os.remove(symlink_path)
+        os.symlink(model_dir_name, symlink_path, target_is_directory=True)
 
         try:
             # Setup model

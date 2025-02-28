@@ -502,13 +502,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         results_dir = sys.argv[1]
     else:
-        # Find the most recent results directory
-        result_dirs = [d for d in os.listdir('.') if d.startswith('quotation_test_results_')]
-        if not result_dirs:
-            print("No results directories found")
-            sys.exit(1)
-
-        results_dir = sorted(result_dirs)[-1]
+        results_dir = "latest_results"
         print(f"Using most recent results directory: {results_dir}")
 
     main(results_dir)
