@@ -506,10 +506,9 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
     test_dataset.to_json(json_path, orient='records')
 
     # Save activation metadata if captured
-    if capture_layers is not None:
-        activation_meta_path = os.path.join(output_dir, f"activation_metadata_{timestamp}.json")
-        with open(activation_meta_path, 'w') as f:
-            json.dump(activation_data, f, indent=2)
+    activation_meta_path = os.path.join(output_dir, f"activation_metadata_{timestamp}.json")
+    with open(activation_meta_path, 'w') as f:
+        json.dump(activation_data, f, indent=2)
 
     return test_dataset
 
