@@ -4,3 +4,4 @@
 /latest_results
 /__pycache__/
 /.env
+/injection_analysis*
