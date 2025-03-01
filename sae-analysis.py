@@ -241,7 +241,7 @@ def load_llama_scope_saes(layers, repo_id="fnlp/Llama3_1-8B-Base-LXR-8x", hf_tok
 def format_prompt(prompt, model_name):
     """Format a prompt for the specified model."""
     if "Instruct" in model_name:
-        if "Meta-Llama-3" in model_name:
+        if "Llama-3" in model_name:
             return f"<|begin_of_text|><|user|>\n{prompt}<|end_of_turn|>\n<|assistant|>\n"
         else:
             return f"### Instruction:\n{prompt}\n\n### Response:\n"
@@ -503,9 +503,9 @@ def main():
             model_name = args.model_name
         else:
             if args.model_type == "instruct":
-                model_name = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+                model_name = "meta-llama/Llama-3.1-8B-Instruct"
             else:
-                model_name = "meta-llama/Meta-Llama-3.1-8B"
+                model_name = "meta-llama/Llama-3.1-8B"
 
         # Load model
         print(f"Loading model: {model_name}")
