@@ -768,10 +768,6 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
             # Extract ID from filename
             example_id = act_file.replace("activations_", "").replace(".pt", "")
 
-            # if the name contains 'baseline', skip it; we're going to skip it later anyway, don't load it.
-            if 'baseline' in example_id:
-                continue
-
             # Find corresponding test result
             if example_id not in results_by_id:
                 continue
