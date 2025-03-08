@@ -25,6 +25,8 @@ my_hf_token = get_hf_token()
 
 #use_model_name = "Qwen/Qwen2.5-7B-Instruct"
 use_model_name = "meta-llama/Llama-3.1-8B-Instruct"
+use_layers = [0, 4, 8, 12, 16, 20, 24]
+capture_activations_max = 100
 
 #%%
 # Import our dataset generator
@@ -179,62 +181,6 @@ def setup_model(model_name=use_model_name, base_model=False, device_map="cuda"):
     return model, tokenizer
 
 #%%
-"""
-def capture_activations(model, tokenizer, prompt, layer_numbers=None):
-    " ""
-    Capture activations from specific layers for a given prompt.
-
-    Args:
-        model: The loaded model
-        tokenizer: The tokenizer
-        prompt: The input prompt
-        layer_numbers: List of layer indices to capture (None = all layers)
-
-    Returns:
-        dict: Mapping of layer indices to activation tensors
-    " ""
-    raise NotImplementedError("We don't use this right now.")
-    instruct = "Instruct" in model.config._name_or_path
-    formatted_prompt = format_prompt(prompt, instruct=instruct)
-
-    # Tokenize the prompt
-    inputs = tokenizer(formatted_prompt, return_tensors="pt").to(model.device)
-    input_ids = inputs.input_ids
-
-    # Set up hooks to capture activations
-    activation_dict = {}
-    hooks = []
-
-    if layer_numbers is None:
-        # Capture all transformer layers
-        layer_numbers = list(range(model.config.num_hidden_layers))
-
-    def get_activation(name):
-        # Give the hook a name we can find later.
-        def get_activations_hook_gwillen(module, input, output):
-            # Move activations to CPU to save GPU memory
-            activation_dict[name] = output[0].detach().cpu().float()
-        return get_activations_hook_gwillen
-
-    # Register hooks for the specified layers
-    for layer_idx in layer_numbers:
-        layer_name = f"layer_{layer_idx}"
-        hook = get_activation(layer_name)
-        layer = model.model.layers[layer_idx]
-        hooks.append(layer.register_forward_hook(hook))
-
-    # Run a forward pass
-    with torch.no_grad():
-        outputs = model(input_ids=input_ids)
-
-    # Remove the hooks
-    for hook in hooks:
-        hook.remove()
-
-    return activation_dict
-"""
-
-#%%
 default_sys_prompt = "You are a helpful assistant. Follow the user's instructions. Give only single-word answers."
 
 def format_prompt(prompt, instruct=False, sys_prompt=default_sys_prompt):
@@ -381,12 +327,14 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
                 def get_activations_hook_gwillen(module, input, output):
                     # Move activations to CPU to save GPU memory
                     # Keep the batch dimension intact
-                    activation_dict[name] = output[0].detach().cpu().float()
-                    shape = activation_dict[name].shape
+                    shape = output[0].shape
                     if shape[1] == 1:
                         return  # only do prompt activations
                     else:
                         pass #print(f"Activation shape: {shape}; shape as list: {list(shape)}; shape[1]: {shape[1]}")
+                    # Get only the last capture_activations_max activations
+                    use_activations = output[0][:, -capture_activations_max:, :]
+                    activation_dict[name] = use_activations.detach().cpu().float()
                     # Log about it
                     #print(f"Captured activation for {name} with shape {activation_dict[name].shape} in batch starting at {i}")
                 return get_activations_hook_gwillen
@@ -469,6 +417,7 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
                     }
                 }
                 activation_path = os.path.join(output_dir, f"activations_{test_id}.pt")
+                print(f"Writing out activations: {activation_path}")
                 torch.save(test_activations, activation_path)
                 del test_activations  # Free up memory?
 
@@ -527,7 +476,7 @@ def main():
 
     # Symlink the latest results to a fixed location
     latest_output_dir = "latest_results"
-    if os.path.exists(latest_output_dir):
+    if os.path.exists(latest_output_dir):  # XXX: this doesn't work if the link is dangling lol
         os.remove(latest_output_dir)
     os.symlink(base_output_dir, latest_output_dir, target_is_directory=True)
 
@@ -537,8 +486,8 @@ def main():
 
     # Define models to test
     models_to_test = [
-        {"name": "meta-llama/Llama-3.1-8B-Instruct", "is_base": False, "device_map": "cuda:0", "selected_layers": None}, # XXX [0, 8, 16, 24]},
-        {"name": "meta-llama/Llama-3.1-8B", "is_base": True, "device_map": "cuda:1", "selected_layers": None}, # XXX [0, 8, 16, 24]}
+        {"name": "meta-llama/Llama-3.1-8B-Instruct", "is_base": False, "device_map": "cuda:0", "selected_layers": use_layers},
+        {"name": "meta-llama/Llama-3.1-8B", "is_base": True, "device_map": "cuda:1", "selected_layers": use_layers}
     ]
 
     # Test each model
@@ -586,4 +535,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# %%
+#%%
+
+print("Done!")
+#%%

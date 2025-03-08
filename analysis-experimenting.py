@@ -298,12 +298,6 @@ result_bad = analysis_df.groupby(['model_type', 'category'])['bad_prob'].mean().
 # Create multiple visualizations
 fig, axes = plt.subplots(1, 4, figsize=(18, 6))
 
-# Plot good - bad difference
-sns.barplot(data=result_diff, x='category', y='resistance_score', hue='model_type', ax=axes[0])
-axes[0].set_title('Resistance Score (Good - Bad Token Probability)')
-axes[0].set_xlabel('')
-axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45)
-
 # Plot good probability
 sns.barplot(data=result_good, x='category', y='good_prob', hue='model_type', ax=axes[1])
 axes[1].set_title('Good Token Probability')
@@ -320,6 +314,12 @@ sns.barplot(data=result_ratio, x='category', y='resistance_ratio', hue='model_ty
 axes[3].set_title('Resistance Ratio (Good / (Good + Bad) Token Probability)')
 axes[3].set_xlabel('')
 axes[3].set_xticklabels(axes[3].get_xticklabels(), rotation=45)
+
+# Plot good - bad difference
+sns.barplot(data=result_diff, x='category', y='resistance_score', hue='model_type', ax=axes[0])
+axes[0].set_title('Resistance Score (Good - Bad Token Probability)')
+axes[0].set_xlabel('')
+axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45)
 
 plt.suptitle('Prompt Injection Resistance by Model Type and Category', fontsize=16)
 plt.tight_layout()
