@@ -25,8 +25,8 @@ my_hf_token = get_hf_token()
 
 #use_model_name = "Qwen/Qwen2.5-7B-Instruct"
 use_model_name = "meta-llama/Llama-3.1-8B-Instruct"
-use_layers = [0, 4, 8, 12, 16, 20, 24]
-capture_activations_max = 100
+use_layers = None #[0, 4, 8, 12, 16, 20, 24]
+capture_activations_max = 999  # all
 
 #%%
 # Import our dataset generator
@@ -218,7 +218,7 @@ def run_tests_batched(model, tokenizer, test_dataset, output_dir, batch_size=99,
         test_dataset: DataFrame containing test cases
         output_dir: Directory to save results
         batch_size: Number of examples to process simultaneously
-        capture_layers: List of layer indices to capture activations from (None = no capture)
+        capture_layers: List of layer indices to capture activations from (None = capture all)
 
     Returns:
         DataFrame: The test dataset with response columns added

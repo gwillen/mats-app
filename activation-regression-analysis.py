@@ -118,7 +118,7 @@ def compute_token_probs(test_result):
     return direct_prob, quoted_prob
 
 #%%
-def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=None, min_examples=10):
+def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=None, min_examples=2, graph_each=4):
     """
     Perform regression analysis by layer to find activation directions related to direct vs quoted instruction preferences.
 
@@ -183,6 +183,7 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
     #layer_names = layer_names[:2]
 
     # Analyze each layer
+    layer_idx = 0
     for layer_name in tqdm(layer_names, desc="Analyzing layers"):
         print(f"\nProcessing {layer_name}...")
 
@@ -297,36 +298,39 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
             'prediction_corr': np.corrcoef(y, y_pred)[0, 1]
         }
 
-        # Visualize predictions vs actual
-        plt.figure(figsize=(10, 6))
-        plt.scatter(y, y_pred, alpha=0.5)
-        plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
-        plt.xlabel('Actual Probability Difference (Direct - Quoted)')
-        plt.ylabel('Predicted Probability Difference')
-        plt.title(f'Layer {layer_name}: Regression Performance (R² = {r2:.4f}) for {analysis_model}')
-        plt.grid(alpha=0.3)
+        if layer_idx % graph_each == 0:
+            # Visualize predictions vs actual
+            plt.figure(figsize=(10, 6))
+            plt.scatter(y, y_pred, alpha=0.5)
+            plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
+            plt.xlabel('Actual Probability Difference (Direct - Quoted)')
+            plt.ylabel('Predicted Probability Difference')
+            plt.title(f'Layer {layer_name}: Regression Performance (R² = {r2:.4f}) for {analysis_model}')
+            plt.grid(alpha=0.3)
 
-        # Add annotations: green = direct wins, red = quoted wins
-        for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
-            if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
-                color = 'green' if actual > 0 else 'red'
-                plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
+            # Add annotations: green = direct wins, red = quoted wins
+            for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
+                if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
+                    color = 'green' if actual > 0 else 'red'
+                    plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, f'{layer_name}_regression.png'))
-        plt.close()
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'{layer_name}_regression.png'))
+            plt.close()
 
-        # Visualize top coefficients
-        plt.figure(figsize=(12, 6))
-        plt.bar(range(20), top_coef[:20])
-        plt.xlabel('Top Dimensions (by coefficient magnitude)')
-        plt.ylabel('Coefficient Value')
-        plt.title(f'Layer {layer_name}: Top 20 Dimensions for {analysis_model}')
-        plt.xticks(range(20), top_idx[:20], rotation=90)
-        plt.grid(axis='y', alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, f'{layer_name}_top_dims.png'))
-        plt.close()
+            # Visualize top coefficients
+            plt.figure(figsize=(12, 6))
+            plt.bar(range(20), top_coef[:20])
+            plt.xlabel('Top Dimensions (by coefficient magnitude)')
+            plt.ylabel('Coefficient Value')
+            plt.title(f'Layer {layer_name}: Top 20 Dimensions for {analysis_model}')
+            plt.xticks(range(20), top_idx[:20], rotation=90)
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'{layer_name}_top_dims.png'))
+            plt.close()
+
+        layer_idx += 1
 
     # Summarize layer results
     if layer_results:
@@ -406,7 +410,7 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
 
     return layer_results
 
-def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=10, num_positions=20):
+def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=2, num_positions=999, graph_each=10):
     """
     Perform regression analysis by token position to find activation directions related to direct vs quoted instruction preferences.
     Analyzes positions counting backwards from the end of the prompt.
@@ -552,6 +556,7 @@ def analyze_activations_by_position(activations_dir, results_file=None, output_d
         except Exception as e:
             print(f"Error processing {act_file}: {e}")
 
+    token_idx = 0
     # Now, analyze each position using the collected data
     for neg_pos, data in tqdm(position_data.items(), desc="Analyzing positions"):
         X = data['X']
@@ -594,24 +599,27 @@ def analyze_activations_by_position(activations_dir, results_file=None, output_d
             'prediction_corr': np.corrcoef(y, y_pred)[0, 1]
         }
 
-        # Visualize predictions vs actual
-        plt.figure(figsize=(10, 6))
-        plt.scatter(y, y_pred, alpha=0.5)
-        plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
-        plt.xlabel('Actual Probability Difference (Direct - Quoted)')
-        plt.ylabel('Predicted Probability Difference')
-        plt.title(f'Position {neg_pos}: Regression Performance (R² = {r2:.4f}) for {analysis_model}')
-        plt.grid(alpha=0.3)
+        if token_idx % graph_each == 0:
+            # Visualize predictions vs actual
+            plt.figure(figsize=(10, 6))
+            plt.scatter(y, y_pred, alpha=0.5)
+            plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
+            plt.xlabel('Actual Probability Difference (Direct - Quoted)')
+            plt.ylabel('Predicted Probability Difference')
+            plt.title(f'Position {neg_pos}: Regression Performance (R² = {r2:.4f}) for {analysis_model}')
+            plt.grid(alpha=0.3)
 
-        # Add annotations: green = direct wins, red = quoted wins
-        for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
-            if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
-                color = 'green' if actual > 0 else 'red'
-                plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
+            # Add annotations: green = direct wins, red = quoted wins
+            for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
+                if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
+                    color = 'green' if actual > 0 else 'red'
+                    plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, f'position_{neg_pos}_regression.png'))
-        plt.close()
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, f'position_{neg_pos}_regression.png'))
+            plt.close()
+
+        token_idx += 1
 
     # Summarize position results
     if position_results:
@@ -863,25 +871,27 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
                 'prediction_corr': np.corrcoef(y, y_pred)[0, 1]
             }
 
-            # Create plots for this layer-position pair
-            plt.figure(figsize=(10, 6))
-            plt.scatter(y, y_pred, alpha=0.5)
-            plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
-            plt.xlabel('Actual Probability Difference (Direct - Quoted)')
-            plt.ylabel('Predicted Probability Difference')
-            plt.title(f'Layer {layer_name}, Position {neg_pos}: Regression (R² = {r2:.4f}) for {analysis_model} (testcases {act_file_prefix})')
-            plt.grid(alpha=0.3)
+            # We don't really need to plot all of these
+            if False:
+                # Create plots for this layer-position pair
+                plt.figure(figsize=(10, 6))
+                plt.scatter(y, y_pred, alpha=0.5)
+                plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
+                plt.xlabel('Actual Probability Difference (Direct - Quoted)')
+                plt.ylabel('Predicted Probability Difference')
+                plt.title(f'Layer {layer_name}, Position {neg_pos}: Regression (R² = {r2:.4f}) for {analysis_model} (testcases {act_file_prefix})')
+                plt.grid(alpha=0.3)
 
-            # Add annotations
-            for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
-                if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
-                    color = 'green' if actual > 0 else 'red'
-                    plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
+                # Add annotations
+                for i, (actual, pred, ex_id) in enumerate(zip(y, y_pred, example_ids)):
+                    if i % max(1, len(y) // 20) == 0:  # Label every ~20 points
+                        color = 'green' if actual > 0 else 'red'
+                        plt.annotate(ex_id.split('_')[-1], (actual, pred), fontsize=8, color=color)
 
-            plt.tight_layout()
-            layer_name_safe = layer_name.replace('/', '_')
-            plt.savefig(os.path.join(plots_dir, f'{layer_name_safe}_pos{abs(neg_pos)}_regression.png'))
-            plt.close()
+                plt.tight_layout()
+                layer_name_safe = layer_name.replace('/', '_')
+                plt.savefig(os.path.join(plots_dir, f'{layer_name_safe}_pos{abs(neg_pos)}_regression.png'))
+                plt.close()
 
     # Save results to JSON file
     results_path = os.path.join(output_dir, 'grid_regression_results.json')
@@ -1013,9 +1023,10 @@ for model_type in ["base", "instruct"]:
     if args.output_dir is None:
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output_dir = f"actr_final_{timestamp}_{model_type}"
+        args.output_dir = f"results/actr_final_{timestamp}_{model_type}"
 
     os.makedirs(args.output_dir, exist_ok=True)
+    os.system(f"ln -sf {args.output_dir} latest_actr")
 
     # Run analyses
     #layer_results = analyze_activations_by_layer(
@@ -1026,16 +1037,16 @@ for model_type in ["base", "instruct"]:
     #)
 
     # Set number of positions to analyze
-    num_positions = 100 # XXX 20  # Analyze the last 20 tokens
+    num_positions = 999 # analyze all tokens
 
     # Add position analysis
-    #position_results = analyze_activations_by_position(
-    #    args.activations_dir,
-    #    args.results_file,
-    #    args.output_dir,
-    #    args.min_examples,
-    #    num_positions
-    #)
+    position_results = analyze_activations_by_position(
+        args.activations_dir,
+        args.results_file,
+        args.output_dir,
+        args.min_examples,
+        num_positions
+    )
 
     # Add grid analysis
     grid_results = analyze_activations_by_grid(
@@ -1048,14 +1059,14 @@ for model_type in ["base", "instruct"]:
     )
 
     # Do one with just the information_extraction ones
-    #grid_results_2 = analyze_activations_by_grid(
-    #    args.activations_dir,
-    #    args.results_file,
-    #    f"actr_final_{timestamp}_{model_type}-information_extraction",
-    #    3, # args.min_examples,
-    #    num_positions,
-    #    act_file_prefix="activations_information_extraction_",
-    #)
+    grid_results_2 = analyze_activations_by_grid(
+        args.activations_dir,
+        args.results_file,
+        f"actr_final_{timestamp}_{model_type}-information_extraction",
+        3, # args.min_examples,
+        num_positions,
+        act_file_prefix="activations_information_extraction_",
+    )
 
     print(f"Analysis complete. Layer results and position results saved to {args.output_dir}")
 #%%
