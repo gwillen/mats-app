@@ -412,7 +412,7 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
 
     return layer_results
 
-def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=4, num_positions=999, graph_each=10):
+def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=4, num_positions=100, graph_each=10):
     """
     Perform regression analysis by token position to find activation directions related to direct vs quoted instruction preferences.
     Analyzes positions counting backwards from the end of the prompt.
@@ -698,7 +698,7 @@ def analyze_activations_by_position(activations_dir, results_file=None, output_d
     return position_results
 
 # Now a grid, both position and layer
-def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=None, min_examples=10, num_positions=20, act_file_prefix="activations_"):
+def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=None, min_examples=10, num_positions=20, act_file_prefix="activations_", count_from_start=False):
     global analysis_model
 
     if output_dir is None:
@@ -740,12 +740,16 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
 
     print(f"Found {len(layer_names)} layers")
 
+    # Determine position indexing direction
+    position_direction = "start" if count_from_start else "end"
+    print(f"Counting positions from {position_direction} of sequence")
+
     grid_data = {}
     for layer_name in layer_names:
         grid_data[layer_name] = {}
-        for pos in range(1, num_positions + 1):
-            neg_pos = -pos
-            grid_data[layer_name][neg_pos] = {
+        for pos in range(num_positions):
+            pos_key = pos if count_from_start else -(pos + 1)  # 0-based forward or -1-based backward
+            grid_data[layer_name][pos_key] = {
                 'X': [],
                 'y': [],
                 'example_ids': [],
@@ -813,17 +817,19 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
                 max_pos = min(num_positions, seq_length)
 
                 # Process each position for this layer
-                for pos in range(1, max_pos + 1):
-                    neg_pos = -pos  # Convert to negative index
+                for pos in range(max_pos):
+                    # Use positive index if counting from start, negative if from end
+                    pos_idx = pos if count_from_start else -(pos + 1)
+                    pos_key = pos_idx  # Store with the same indexing scheme
 
                     # Extract activations for this position
-                    pos_act = layer_act[neg_pos].reshape(-1).cpu().numpy()
+                    pos_act = layer_act[pos_idx].reshape(-1).cpu().numpy()
 
                     # Add to grid data
-                    grid_data[layer_name][neg_pos]['X'].append(pos_act)
-                    grid_data[layer_name][neg_pos]['y'].append(prob_diff)
-                    grid_data[layer_name][neg_pos]['example_ids'].append(example_id)
-                    grid_data[layer_name][neg_pos]['categories'].append(category)
+                    grid_data[layer_name][pos_key]['X'].append(pos_act)
+                    grid_data[layer_name][pos_key]['y'].append(prob_diff)
+                    grid_data[layer_name][pos_key]['example_ids'].append(example_id)
+                    grid_data[layer_name][pos_key]['categories'].append(category)
 
         except Exception as e:
             print(f"Error processing {act_file}: {e}")
@@ -834,18 +840,23 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
 
     # Now analyze each layer-position pair
     for layer_name in tqdm(layer_names, desc="Analyzing layers"):
-        for neg_pos in tqdm([f"-{pos}" for pos in range(1, num_positions + 1)],
-                            desc=f"Analyzing positions for {layer_name}", leave=False):
-            neg_pos = int(neg_pos)  # Convert string back to integer
+        # Generate position keys based on direction
+        if count_from_start:
+            positions = list(range(num_positions))
+        else:
+            positions = [-(i + 1) for i in range(num_positions)]
+
+        for pos in tqdm(positions, desc=f"Analyzing positions for {layer_name}", leave=False):
+            pos_key = pos  # Use the same key as stored
 
             # Skip if not enough examples
-            if neg_pos not in grid_data[layer_name] or len(grid_data[layer_name][neg_pos]['X']) < min_examples:
-                print(f"Only {len(grid_data[layer_name][neg_pos]['X'])} examples for {layer_name}, {neg_pos}, skipping")
+            if pos_key not in grid_data[layer_name] or len(grid_data[layer_name][pos_key]['X']) < min_examples:
+                print(f"Only {len(grid_data[layer_name].get(pos_key, {}).get('X', []))} examples for {layer_name}, {pos_key}, skipping")
                 continue
 
-            X = np.array(grid_data[layer_name][neg_pos]['X'])
-            y = np.array(grid_data[layer_name][neg_pos]['y'])
-            example_ids = grid_data[layer_name][neg_pos]['example_ids']
+            X = np.array(grid_data[layer_name][pos_key]['X'])
+            y = np.array(grid_data[layer_name][pos_key]['y'])
+            example_ids = grid_data[layer_name][pos_key]['example_ids']
 
             # Train ridge regression model
             regressor = Ridge(alpha=1.0)
@@ -855,7 +866,7 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
             y_pred = regressor.predict(X)
             r2 = r2_score(y, y_pred)
 
-            print(f"Layer {layer_name}, Position {neg_pos}: R² = {r2:.4f}")
+            ##print(f"Layer {layer_name}, Position {pos_key}: R² = {r2:.4f}")
 
             # Find top dimensions by coefficient magnitude
             coef_magnitudes = np.abs(regressor.coef_)
@@ -863,7 +874,7 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
             top_coef = regressor.coef_[top_idx]
 
             # Store results
-            grid_results[layer_name][str(neg_pos)] = {
+            grid_results[layer_name][str(pos_key)] = {
                 'r2': r2,
                 'n_examples': len(X),
                 'top_dimensions': top_idx.tolist(),
@@ -881,7 +892,8 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
                 plt.plot([-1, 1], [-1, 1], 'k--', alpha=0.5)  # Diagonal line
                 plt.xlabel('Actual Probability Difference (Direct - Quoted)')
                 plt.ylabel('Predicted Probability Difference')
-                plt.title(f'Layer {layer_name}, Position {neg_pos}: Regression (R² = {r2:.4f}) for {analysis_model} (testcases {act_file_prefix})')
+                pos_desc = f"Position {pos}" if count_from_start else f"Position {pos}"
+                plt.title(f'Layer {layer_name}, {pos_desc}: Regression (R² = {r2:.4f}) for {analysis_model} (testcases {act_file_prefix})')
                 plt.grid(alpha=0.3)
 
                 # Add annotations
@@ -892,7 +904,8 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
 
                 plt.tight_layout()
                 layer_name_safe = layer_name.replace('/', '_')
-                plt.savefig(os.path.join(plots_dir, f'{layer_name_safe}_pos{abs(neg_pos)}_regression.png'))
+                pos_suffix = f"pos{pos}" if count_from_start else f"pos_from_end{abs(pos)}"
+                plt.savefig(os.path.join(plots_dir, f'{layer_name_safe}_{pos_suffix}_regression.png'))
                 plt.close()
 
     # Save results to JSON file
@@ -922,14 +935,14 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
     # Collect all layers and positions that have results
     for layer_idx, layer_name in enumerate(layer_names):
         if layer_name in grid_results:
-            positions = sorted([int(pos) for pos in grid_results[layer_name].keys()])
+            positions = [int(pos) for pos in grid_results[layer_name].keys()]
             if positions:
                 layer_indices.append(layer_idx)
                 for pos in positions:
                     if pos not in position_indices:
                         position_indices.append(pos)
 
-    # Sort positions
+    # Sort positions - ascending for forward counting, descending for backward
     position_indices.sort()
 
     # Create R² matrix
@@ -950,36 +963,47 @@ def analyze_activations_by_grid(activations_dir, results_file=None, output_dir=N
 
         # Create readable layer labels
         layer_labels = [layer_names[idx] for idx in layer_indices]
-        position_labels = [str(abs(pos)) for pos in position_indices]
+
+        # Create position labels based on direction
+        if count_from_start:
+            position_labels = [str(pos) for pos in position_indices]
+            x_label = 'Position (tokens from start)'
+        else:
+            position_labels = [str(abs(pos)) for pos in position_indices]
+            x_label = 'Position (tokens from end)'
 
         # Create heatmap
         sns.heatmap(r2_matrix, cmap="viridis", # XXX ugly annot=True, fmt=".3f",
                    xticklabels=position_labels, yticklabels=layer_labels,
                    cbar_kws={'label': 'R² Score'})
 
-        plt.title(f'Grid Analysis: R² Scores by Layer and Position for {analysis_model} (testcases {act_file_prefix})')
-        plt.xlabel('Position (tokens from end)')
-        plt.ylabel('Layer')
+        direction_text = "from start" if count_from_start else "from end"
+        plt.title(f'Grid Analysis: R² Scores by Layer and Position ({direction_text}) for {analysis_model} (testcases {act_file_prefix})', fontsize=28)
+        plt.xlabel(x_label, fontsize=24)
+        plt.ylabel('Layer', fontsize=24)
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
         plt.tight_layout()
         plt.savefig(os.path.join(plots_dir, 'grid_r2_heatmap.png'), dpi=150)
         plt.close()
 
-        # Also create a version with higher/lower cutoffs for better visualization
-        plt.figure(figsize=(20, 12))
-        r2_array = np.array(r2_matrix)
-        vmin = max(0, np.nanpercentile(r2_array, 5))  # 5th percentile or 0, whichever is higher
-        vmax = min(1, np.nanpercentile(r2_array, 95))  # 95th percentile or 1, whichever is lower
+        if False:  # I don't actually like this version
+            # Also create a version with higher/lower cutoffs for better visualization
+            plt.figure(figsize=(20, 12))
+            r2_array = np.array(r2_matrix)
+            vmin = max(0, np.nanpercentile(r2_array, 5))  # 5th percentile or 0, whichever is higher
+            vmax = min(1, np.nanpercentile(r2_array, 95))  # 95th percentile or 1, whichever is lower
 
-        sns.heatmap(r2_matrix, cmap="viridis", # XXX ugly annot=True, fmt=".3f",
-                   xticklabels=position_labels, yticklabels=layer_labels,
-                   cbar_kws={'label': 'R² Score'}, vmin=vmin, vmax=vmax)
+            sns.heatmap(r2_matrix, cmap="viridis", # XXX ugly annot=True, fmt=".3f",
+                    xticklabels=position_labels, yticklabels=layer_labels,
+                    cbar_kws={'label': 'R² Score'}, vmin=vmin, vmax=vmax)
 
-        plt.title(f'Grid Analysis: R² Scores by Layer and Position (Normalized Scale) for {analysis_model} (testcases {act_file_prefix})')
-        plt.xlabel('Position (tokens from end)')
-        plt.ylabel('Layer')
-        plt.tight_layout()
-        plt.savefig(os.path.join(plots_dir, 'grid_r2_heatmap_normalized.png'), dpi=150)
-        plt.close()
+            plt.title(f'Grid Analysis: R² Scores by Layer and Position ({direction_text}, Normalized Scale) for {analysis_model} (testcases {act_file_prefix})')
+            plt.xlabel(x_label)
+            plt.ylabel('Layer')
+            plt.tight_layout()
+            plt.savefig(os.path.join(plots_dir, 'grid_r2_heatmap_normalized.png'), dpi=150)
+            plt.close()
 
     # Find top 10 layer-position pairs by R² score
     top_pairs = []
@@ -1039,7 +1063,7 @@ for model_type in ["base", "instruct"]:
     #)
 
     # Set number of positions to analyze
-    num_positions = 999 # analyze all tokens
+    num_positions = 100 # analyze all tokens
 
     # Add position analysis
     #position_results = analyze_activations_by_position(
