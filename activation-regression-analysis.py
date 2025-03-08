@@ -118,7 +118,7 @@ def compute_token_probs(test_result):
     return direct_prob, quoted_prob
 
 #%%
-def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=None, min_examples=2, graph_each=4):
+def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=None, min_examples=4, graph_each=4):
     """
     Perform regression analysis by layer to find activation directions related to direct vs quoted instruction preferences.
 
@@ -173,90 +173,93 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
 
     print(f"Found {len(layer_names)} layers: {', '.join(layer_names[:5])}...")
 
+    # Initialize data structure for all layers
+    layer_data = {}
+    for layer_name in layer_names:
+        layer_data[layer_name] = {
+            'X': [],  # Activations
+            'y': [],  # Probability differences
+            'example_ids': [],  # Example IDs
+            'categories': []  # Categories
+        }
+
     # Dictionary to store results by layer
     layer_results = {}
 
     # Track cases by category for reporting
     category_counts = {}
 
-    #print("LIMITING LAYERS FOR TESTING")
-    #layer_names = layer_names[:2]
+    # Process all activation files once
+    for act_file in tqdm(activation_files, desc="Processing activation files"):
+        try:
+            # Extract ID from filename
+            example_id = act_file.replace("activations_", "").replace(".pt", "")
 
-    # Analyze each layer
-    layer_idx = 0
-    for layer_name in tqdm(layer_names, desc="Analyzing layers"):
-        print(f"\nProcessing {layer_name}...")
+            # Find corresponding test result
+            if example_id not in results_by_id:
+                continue
 
-        # Collect data for this layer
-        X = []  # Activations
-        y = []  # Probability differences
-        example_ids = []  # Keep track of which examples we use
-        categories = []  # Keep track of categories
+            test_result = results_by_id[example_id]
+            print(f"Processing {example_id} ({test_result['category']})")
 
-        # Process all activation files
-        for act_file in tqdm(activation_files, desc=f"Processing {layer_name}", leave=False):
-            try:
-                # Extract ID from filename
-                example_id = act_file.replace("activations_", "").replace(".pt", "")
+            # Skip baseline cases
+            if test_result['category'] == 'baseline':
+                continue
 
-                # Find corresponding test result
-                if example_id not in results_by_id:
-                    continue
+            # Get direct and quoted token probabilities
+            direct_prob, quoted_prob = compute_token_probs(test_result)
 
-                test_result = results_by_id[example_id]
-                print(f"Processing {example_id} ({test_result['category']})")
+            if direct_prob is None or quoted_prob is None:
+                continue
 
-                # Skip baseline cases
-                if test_result['category'] == 'baseline':
-                    continue
+            # Load activations
+            act_path = os.path.join(activations_dir, act_file)
+            activation = torch.load(act_path)
 
-                # Get direct and quoted token probabilities
-                direct_prob, quoted_prob = compute_token_probs(test_result)
+            # Calculate probability difference
+            prob_diff = direct_prob - quoted_prob
 
-                if direct_prob is None or quoted_prob is None:
-                    continue
+            # Update category counts
+            category = test_result['category']
+            if category not in category_counts:
+                category_counts[category] = 0
+            category_counts[category] += 1
 
-                # Load activations
-                act_path = os.path.join(activations_dir, act_file)
-                activation = torch.load(act_path)
-                #print(f"ACTIVATION SHAPE:")
-                #show_shape(activation)
-
-                # Check if this layer exists in the file
+            # Process each layer for this file
+            for layer_name in layer_names:
                 if layer_name not in activation:
                     continue
 
-                # Calculate probability difference
-                prob_diff = direct_prob - quoted_prob
-
                 # Extract and process activations
                 layer_act = activation[layer_name]
-                #print(f"LAYER_ACT SHAPE:")
-                #show_shape(layer_act)
 
                 # Mean pooling across sequence length
                 if len(layer_act.shape) >= 2:
                     layer_act = layer_act.mean(dim=0)
-                #print(f"MEAN POOLED LAYER_ACT SHAPE:")
-                #show_shape(layer_act)
 
                 # Flatten to 1D if needed
                 layer_act = layer_act.reshape(-1).cpu().numpy()
 
                 # Add to datasets
-                X.append(layer_act)
-                y.append(prob_diff)
-                example_ids.append(example_id)
-                categories.append(test_result['category'])
+                layer_data[layer_name]['X'].append(layer_act)
+                layer_data[layer_name]['y'].append(prob_diff)
+                layer_data[layer_name]['example_ids'].append(example_id)
+                layer_data[layer_name]['categories'].append(category)
 
-                # Update category counts
-                category = test_result['category']
-                if category not in category_counts:
-                    category_counts[category] = 0
-                category_counts[category] += 1
+        except Exception as e:
+            print(f"Error processing {act_file}: {e}")
 
-            except Exception as e:
-                print(f"Error processing {act_file}: {e}")
+    print(f"Category distribution: {category_counts}")
+
+    # Analyze each layer using the collected data
+    layer_idx = 0
+    for layer_name in tqdm(layer_names, desc="Analyzing layers"):
+        print(f"\nProcessing {layer_name}...")
+
+        # Get data for this layer
+        X = layer_data[layer_name]['X']
+        y = layer_data[layer_name]['y']
+        example_ids = layer_data[layer_name]['example_ids']
 
         # Skip if not enough data
         if len(X) < min_examples:
@@ -270,7 +273,6 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
         y = np.array(y)
 
         print(f"Collected {len(X)} examples with shapes: X = {X.shape}, y = {y.shape}")
-        print(f"Category distribution: {category_counts}")
 
         # Train ridge regression model
         regressor = Ridge(alpha=1.0)
@@ -410,7 +412,7 @@ def analyze_activations_by_layer(activations_dir, results_file=None, output_dir=
 
     return layer_results
 
-def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=2, num_positions=999, graph_each=10):
+def analyze_activations_by_position(activations_dir, results_file=None, output_dir=None, min_examples=4, num_positions=999, graph_each=10):
     """
     Perform regression analysis by token position to find activation directions related to direct vs quoted instruction preferences.
     Analyzes positions counting backwards from the end of the prompt.
@@ -1040,13 +1042,13 @@ for model_type in ["base", "instruct"]:
     num_positions = 999 # analyze all tokens
 
     # Add position analysis
-    position_results = analyze_activations_by_position(
-        args.activations_dir,
-        args.results_file,
-        args.output_dir,
-        args.min_examples,
-        num_positions
-    )
+    #position_results = analyze_activations_by_position(
+    #    args.activations_dir,
+    #    args.results_file,
+    #    args.output_dir,
+    #    args.min_examples,
+    #    num_positions
+    #)
 
     # Add grid analysis
     grid_results = analyze_activations_by_grid(
@@ -1062,8 +1064,8 @@ for model_type in ["base", "instruct"]:
     grid_results_2 = analyze_activations_by_grid(
         args.activations_dir,
         args.results_file,
-        f"actr_final_{timestamp}_{model_type}-information_extraction",
-        3, # args.min_examples,
+        f"results/actr_final_{timestamp}_{model_type}-information_extraction",
+        4, # args.min_examples,
         num_positions,
         act_file_prefix="activations_information_extraction_",
     )
